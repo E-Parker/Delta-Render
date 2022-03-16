@@ -1,4 +1,4 @@
-# This program handles asset creation / reassignment for version 2.7 of ΔRender
+# This program handles asset creation / reassignment for version 2.4 of ΔRender
 # This program was writen by Ethan Parker
 
 import func
@@ -102,22 +102,20 @@ def Combine_Mesh(meshes):
         new_mesh.vertices += current_mesh.vertices
         new_mesh.uv_vertices += current_mesh.uv_vertices
 
-        polygons = []
-        uv_polygons = []
         # Offset polygons by the new index:
         for index in range(len(current_mesh.polygons)):
             textures_index.append(x)
-            polygons.append((current_mesh.polygons[index][0] + index_offset,
-                             current_mesh.polygons[index][1] + index_offset,
-                             current_mesh.polygons[index][2] + index_offset))
+            new_mesh.polygons += ((current_mesh.polygons[index][0] + index_offset,
+                                   current_mesh.polygons[index][1] + index_offset,
+                                   current_mesh.polygons[index][2] + index_offset),)
+
         # Offset texture polygons the new index:
 
         for index in range(len(current_mesh.uv_polygons)):
-            uv_polygons.append((current_mesh.uv_polygons[index][0] + tex_index_offset,
-                                current_mesh.uv_polygons[index][1] + tex_index_offset,
-                                current_mesh.uv_polygons[index][2] + tex_index_offset))
-        new_mesh.polygons += tuple(polygons)
-        new_mesh.uv_polygons += tuple(uv_polygons)
+            new_mesh.uv_polygons += ((current_mesh.uv_polygons[index][0] + tex_index_offset,
+                                      current_mesh.uv_polygons[index][1] + tex_index_offset,
+                                      current_mesh.uv_polygons[index][2] + tex_index_offset),)
+
     return new_mesh, textures, textures_index
 
 

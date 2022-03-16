@@ -1,21 +1,20 @@
-# This program is the mainline for version 2.7 of ΔRender
+# This program is the mainline for version 2.4 of ΔRender
 # this program was writen by Ethan Parker
 
 
+# import copy
 import func
 import make
-import render
 import pygame
 import math
-import copy
-from pygame import PixelArray as PxArry
+import render
+from pygame.locals import *
 from pygame.math import Vector3 as Vect3
 from pygame.math import Vector2 as Vect2
 
-SCALE = 4
-FOV = 90
-SCREENSIZE = (640, 480)
-
+SCALE = 7
+RENDER_SCALE = 500
+SCREENSIZE = (1280, 720)
 
 class Game:
     def __init__(self, meshes, colliders, screensize, res, fov):
@@ -29,35 +28,31 @@ class Game:
         self.textures = []
         self.textures_index = []
         self.frame_delta = 0
-
-        # Initialize Camera:
-        self.render_resolution = (screensize[0] // res, screensize[1] // res)
-        self.camera = func.Camera(0.1, 32, fov, self.render_resolution, screensize)
-        self.scale = res
+        self.is_active = True
 
         # Display Settings:
-        self.font = pygame.font.SysFont("courier new", 24)
-        self.screen = pygame.Surface(self.render_resolution).convert()
-        self.screen.set_colorkey(render.TRANSPARENCY)
+        self.screensize = screensize
+        self.screensize_center = (screensize[0] / 2, screensize[1] / 2)
+        self.scale = res
+        self.render_scale = fov / self.scale
+        self.render_size = (screensize[0] // res, screensize[1] // res)
+        self.center = (self.render_size[0] // 2, self.render_size[1] // 2,)
+        self.screen = pygame.Surface(self.render_size).convert()
         self.screen.lock()
-        self.pixel_array = PxArry(self.screen)
+        print("render scale",self.render_scale)
 
         # Render settings:
+        self.camera = func.Camera(fov, 0.25, 16, self.render_size, self.render_scale)
         self.missing_texture = pygame.image.load("dependencies/textures/missing.png").convert()
         self.sky_colour = pygame.Color(250, 250, 240)
 
         # Buffer Objects:
-        self.depth = func.gen_buffer(self.camera.far, self.render_resolution[0], self.render_resolution[1])
+        self.depth = func.gen_buffer(self.camera.far, self.render_size[0], self.render_size[1])
+        self.screen_write = pygame.mask.Mask(self.render_size)
 
         # Vectors:
-        self.light_vector = Vect3(0, -0.75, -0.25)
+        self.light_vector = Vect3(0, -0.25, -0.75)
         self.origen = Vect3(0, 0, 0)
-
-        # Booleans:
-        self.is_active = True
-
-        # Debug:
-        self.onscreen = 0
 
     def clipMesh(self, mesh, textures_index):
         """ This function handles clipping the scene. """
@@ -66,7 +61,7 @@ class Game:
         index = 0
         while index < len(mesh):
             face = mesh[index]
-            n = func.getNormal(face.a, face.b, face.c)
+            n = func.getNormal(face.a.p, face.b.p, face.c.p)
             if n.dot(self.camera.rotation) > self.camera.deviation:
                 del mesh[index]
                 del textures_index[index]
@@ -78,55 +73,41 @@ class Game:
             index = 0
             while index < len(mesh):
                 face = mesh[index]
-                a, b, c = (face.a, face.u), (face.b, face.v), (face.c, face.w)
-                a_distance, b_distance, c_distance = plane.pointToPlane(a[0]), plane.pointToPlane(b[0]), plane.pointToPlane(c[0])
-                a_inside, b_inside, c_inside = a_distance > 0.001, b_distance > 0.001, c_distance > 0.001,
-                inside = int(a_inside) + int(b_inside) + int(c_inside)
+                new_face = func.clipPolygonPlane(face.a, face.b, face.c, plane)
 
-                if inside == 0:  # Face is off-screen, don't render. (0 faces)
+                if new_face[2] == 0:  # Face is off-screen, don't render. (0 faces)
                     del mesh[index]
                     del textures_index[index]
-                else:
+                    index -= 1
 
-                    if inside == 1:  # Two points off-screen, clip into trigon, update face.
-                        if a_inside:
-                            b, c = plane.vertexPlaneIntersect(a, b), plane.vertexPlaneIntersect(a, c)
-                        elif b_inside:
-                            a, c = plane.vertexPlaneIntersect(b, a), plane.vertexPlaneIntersect(b, c)
-                        elif c_inside:
-                            b, a = plane.vertexPlaneIntersect(c, b), plane.vertexPlaneIntersect(c, a)
-                        face.update(a, b, c)
-                        mesh[index] = face
+                elif new_face[2] == 1:  # Two points off-screen, clip into trigon. (1 face)
+                    face.update(new_face[0][0], new_face[0][1], new_face[0][2])
+                    mesh[index] = face
 
-                    elif inside == 2:  # One point off-screen. Clip into quad then trigon, update and append face.
-                        new_trigon = func.Trigon()
-                        if not a_inside:  # A is off-screen
-                            ab, ac = plane.vertexPlaneIntersect(a, b), plane.vertexPlaneIntersect(a, c)
-                            new_trigon.update(b, ab, ac)
-                            face.update(c, b, ac)
-
-                        elif not b_inside:  # B is off-screen
-                            bc, ba = plane.vertexPlaneIntersect(b, c), plane.vertexPlaneIntersect(b, a)
-                            new_trigon.update(a, ba, bc)
-                            face.update(a, c, bc)
-
-                        elif not c_inside:  # C is off-screen
-                            cb, ca = plane.vertexPlaneIntersect(c, b), plane.vertexPlaneIntersect(c, a)
-                            new_trigon.update(b, cb, ca)
-                            face.update(b, a, ca)
-                        mesh[index] = face
-                        mesh.append(new_trigon)
+                elif new_face[2] == 2:  # one point is off-screen, clip into two trigons. (2 faces)
+                    new_trigon = func.Trigon()
+                    new_trigon.update(new_face[0][0], new_face[0][1], new_face[0][2])
+                    face.update(new_face[1][0], new_face[1][1], new_face[1][2])
+                    mesh[index] = face
+                    mesh.append(new_trigon)
+                    try:
                         textures_index.append(textures_index[index])
-
-                    index += 1
+                    except IndexError:
+                        pass
+                index += 1
 
         return mesh, textures_index
 
     def clear_depth(self):
         """ This function clears the depth buffer. """
+
         # for all every line of the buffer:
-        for y in range(self.render_resolution[1]):
-            self.depth[y] = [self.camera.far for x in range(self.render_resolution[0])]
+        for y in range(self.render_size[1]):
+            line = self.depth[y]
+            # for every element of the line:
+            for x in range(self.render_size[0]):
+                if self.screen_write.get_at((x, y)) == 1:  # if the pixel has been set, reset it.
+                    line[x] = self.camera.far
 
     def draw_skybox(self):
         """ This function handles drawing the skybox after the rest of the scene has been drawn. """
@@ -134,16 +115,15 @@ class Game:
         skybox.rotate_y(self.camera.y_rotation)
         skybox.rotate_x(-self.camera.x_rotation)
         skybox = self.clipMesh(skybox, list(range(len(skybox))))[0]
-        projected = func.project(skybox, self.camera)
-        render.renderSkybox(projected, self.screen, self.pixel_array, self.skybox_texture)
+        projected = func.project(skybox, self.camera.size, self.center[0], self.center[1])
+        render.renderSkybox(projected, self.screen, self.screen_write, self.skybox_texture)
 
     def render(self):
         """ This function handles rendering the whole scene to self.screen for display. """
         # Update scene:
         new_mesh = make.Combine_Mesh(self.meshes)
         self.world, self.textures, self.textures_index = new_mesh[0], new_mesh[1], new_mesh[2]
-        world_position = self.origen - self.camera.position - Vect3(0, self.camera.height, 0)
-        self.world.move(world_position)
+        self.world.move(self.origen - self.camera.position)
         self.world.rotate_y(self.camera.y_rotation)
         self.world.rotate_x(-1 * self.camera.x_rotation)
 
@@ -152,27 +132,27 @@ class Game:
         self.world, self.textures_index = clipped[0], clipped[1]
 
         # Clear buffers from last frame:
-        self.pixel_array[:] = self.sky_colour
         self.clear_depth()
+        self.screen_write.clear()
         self.world.update()
-        self.onscreen = len(self.world)
+
         # Render Scene:
-        projected = func.project(self.world, self.camera)
-        render.render(projected, self.pixel_array, self.depth, self.textures, self.textures_index, self.camera.filtering_toggle)
+        projected = func.project(self.world, self.camera.size, self.center[0], self.center[1])
+        render.render(projected, self.screen, self.depth, self.screen_write, self.textures, self.textures_index, self.camera.far)
 
     def run_logic(self, clock, fps):
         """ Handles all logic such as collision detection and frame delta. """
         # Get Frame Delta:
         self.frame_delta = clock.tick(60) * 0.001 * fps
-        self.is_active = self.camera.update(self.colliders, self.frame_delta)
+        self.is_active = self.camera.update(self.colliders, self.frame_delta, self.screensize_center)
 
     def draw_screen(self, window):
         self.render()
-        # self.draw_skybox()
+        self.draw_skybox()
+
         # Update Display:
-        screen_scale = pygame.transform.scale(self.screen, window.get_size())
+        screen_scale = pygame.transform.scale(self.screen, self.screensize)
         window.blit(screen_scale, (0, 0))
-        func.display_text(window, 0, "|| Onscreen " + str(self.onscreen) + " | FPS | " + str(round(60 / self.frame_delta)) + " ||", self.font, (0, 0, 0), 'c')
         pygame.display.flip()
 
 
@@ -185,21 +165,22 @@ def main():
     # DISPLAY
     window = pygame.display.set_mode(SCREENSIZE)
     pygame.display.set_caption("Software Render")
+    # font = pygame.font.SysFont("courier new", 12)
 
-    meshes = (make.Mesh("assets/meshes/ship.obj", "assets/textures/ship.png"),
-              make.Mesh("assets/meshes/water.obj", "assets/textures/water.png"),
+    meshes = (make.Mesh("assets/meshes/cube.obj", "assets/textures/gradient.png"),
+              make.Mesh("assets/meshes/plane.obj", "assets/textures/testing2.png"),
               )
 
-    colliders = (make.Collider("assets/colliders/ship.obj", 0.25, True),
+    colliders = (make.Collider("assets/colliders/test_collider.obj", 0.25, True),
                  )
 
-    game = Game(meshes, colliders, SCREENSIZE, SCALE, FOV)
+    game = Game(meshes, colliders, SCREENSIZE, SCALE, RENDER_SCALE)
     pygame.mouse.set_visible(False)
+    pygame.mouse.set_pos(game.screensize_center)
+    game.meshes[0].move_to(Vect3(0, -0.5, 0))
+    game.meshes[1].move_to(Vect3(0, -1.25, 0))
 
-    i = 0
     while True:
-        i += 0.01 * game.frame_delta
-        game.meshes[1].move_to(Vect3(0, -3, i % 32))
         game.run_logic(clock, fps)
         game.draw_screen(window)
         if not game.is_active:

@@ -1,15 +1,46 @@
-# This program contains miscellaneous functions for version 2.7 of ΔRender
+# This program contains miscellaneous functions for version 2.4 of ΔRender
 # This program was writen by Ethan Parker
 
-import os
-import pygame
-import math
 import copy
+import math
+import pygame
+# import os
 from pygame.math import Vector2 as Vect2
 from pygame.math import Vector3 as Vect3
-import multiprocessing as mProc
-import concurrent.futures
 
+# import make
+
+
+class Vertex:
+    """ This class contains a point in 3d space and texture information."""
+    def __init__(self, point=None, uv=None):
+        self.p = point
+        self.t = uv
+
+    def interp_x(self, b, y):
+        """ This function interpolates a Vertex to a given x value."""
+        point = Vect3(interp(self.p.x, self.p.y, b.p.x, b.p.y, y), y, interp(self.p.z, self.p.y, b.p.z, b.p.y, y))
+        tx_point = Vect2(interp(self.t.x, self.p.y, b.t.x, b.p.y, y), interp(self.t.y, self.p.y, b.t.y, b.p.y, y))
+        self.p, self.t = point, tx_point
+
+    def interp_y(self, b, y):
+        """ This function interpolates a Vertex to a given y value."""
+        point = Vect3(interp(self.p.x, self.p.y, b.p.x, b.p.y, y), y, interp(self.p.z, self.p.y, b.p.z, b.p.y, y))
+        tx_point = Vect2(interp(self.t.x, self.p.y, b.t.x, b.p.y, y), interp(self.t.y, self.p.y, b.t.y, b.p.y, y))
+        self.p, self.t = point, tx_point
+
+    def interp_z(self, b, z):
+        """ This function interpolates a Vertex to a given z value."""
+        point = Vect3(interp(self.p.x, self.p.y, b.p.x, b.p.y, z), interp(self.p.y, self.p.z, b.p.y, b.p.z, z), z)
+        tx_point = Vect2(interp(self.t.x, self.p.z, b.t.x, b.p.z, z), interp(self.t.y, self.p.z, b.t.y, b.p.z, z))
+        self.p, self.t = point, tx_point
+
+    def lerp(self, b, amount):
+        """ This function handles interpolating between two vertices. """
+        new_point = self.p.lerp(b.point, amount)
+        new_uv = self.t.lerp(b.uv, amount)
+
+        return Vertex(new_point, new_uv)
 
 
 class Trigon:
@@ -21,32 +52,27 @@ class Trigon:
     def __init__(self, vertices=None, polygon=None, uv=None, uv_polygon=None):
         # Variables:
         try:
-            self.a = vertices[polygon[0]]
-            self.b = vertices[polygon[1]]
-            self.c = vertices[polygon[2]]
-            self.u = uv[uv_polygon[0]]
-            self.v = uv[uv_polygon[1]]
-            self.w = uv[uv_polygon[2]]
+            self.a = Vertex(vertices[polygon[0]], uv[uv_polygon[0]])
+            self.b = Vertex(vertices[polygon[1]], uv[uv_polygon[1]])
+            self.c = Vertex(vertices[polygon[2]], uv[uv_polygon[2]])
 
+            # self.n = getNormal(self.a, self.b, self.c)
             self.n = None
         
         except TypeError:
-            self.a = Vect3()
-            self.b = Vect3()
-            self.c = Vect3()
-            self.u = Vect2()
-            self.v = Vect2()
-            self.w = Vect2()
+            self.a = Vertex()
+            self.b = Vertex()
+            self.c = Vertex()
 
     def __iter__(self):
         """ This function handles indexing a Trigon as if it were a list. """
-        yield self.a, self.u
-        yield self.b, self.v
-        yield self.c, self.w
+        yield self.a
+        yield self.b
+        yield self.c
 
     def update(self, a, b, c):
         """ This function updates all points of the trigon. """
-        self.a, self.b, self.c, self.u, self.v, self.w = a[0], b[0], c[0], a[1], b[1], c[1]
+        self.a, self.b, self.c = a, b, c
 
 
 class Mesh:
@@ -102,20 +128,29 @@ class Mesh:
 
     def __setitem__(self, key, trigon):
         """ This function handles adding a new trigon to the mesh. """
-        a_index = self.setVertex(trigon.a)
-        b_index = self.setVertex(trigon.b)
-        c_index = self.setVertex(trigon.c)
-        u_index = self.setTextureVertex(trigon.u)
-        v_index = self.setTextureVertex(trigon.v)
-        w_index = self.setTextureVertex(trigon.w)
-
-        self.polygons = self.polygons[:key] + ((a_index, b_index, c_index),) + self.polygons[key + 1:]
-        self.uv_polygons = self.uv_polygons[:key] + ((u_index, v_index, w_index),) + self.uv_polygons[key + 1:]
+        self.setItem(key, trigon)
 
     def append(self, trigon):
         """ This function handles appending a new trigon to the mesh. """
-        self.polygons += ((self.setVertex(trigon.a), self.setVertex(trigon.b), self.setVertex(trigon.c)),)
-        self.uv_polygons += ((self.setTextureVertex(trigon.u), self.setTextureVertex(trigon.v), self.setTextureVertex(trigon.w)),)
+        self.setItem(None, trigon)
+
+    def setItem(self, key, trigon):
+        """ This function handles setting or adding a polygon to the mesh.
+            Used in both __setitem__ and append methods. """
+        a_index = self.setVertex(trigon.a.p)
+        b_index = self.setVertex(trigon.b.p)
+        c_index = self.setVertex(trigon.c.p)
+
+        u_index = self.setTextureVertex(trigon.a.t)
+        v_index = self.setTextureVertex(trigon.b.t)
+        w_index = self.setTextureVertex(trigon.c.t)
+
+        if key is None:
+            self.polygons += ((a_index, b_index, c_index),)
+            self.uv_polygons += ((u_index, v_index, w_index),)
+        else:
+            self.polygons = self.polygons[:key] + ((a_index, b_index, c_index),) + self.polygons[key + 1:]
+            self.uv_polygons = self.uv_polygons[:key] + ((u_index, v_index, w_index),) + self.uv_polygons[key + 1:]
 
     def rotate_x(self, angle):
         """ Update x-axis rotation of all points."""
@@ -235,43 +270,36 @@ class Plane:
 
     def vertexPlaneIntersect(self, start, end):
         """ This function calculates the intersection point of a vertex with texture coordinate and a plane. """
-        ad = start[0].dot(self.n)
-        t = (self.d - ad) / ((end[0].dot(self.n)) - ad)
+        ad = start.p.dot(self.n)
+        t = (self.d - ad) / ((end.p.dot(self.n)) - ad)
 
-        intersect = ((end[0] - start[0]) * t) + start[0]
-        tx_intersect = ((end[1] - start[1]) * t) + start[1]
+        intersect = ((end.p - start.p) * t) + start.p
+        tx_intersect = ((end.t - start.t) * t) + start.t
 
-        return intersect, tx_intersect
+        new_vertex = Vertex(intersect, tx_intersect)
+        return new_vertex
 
 
 class Camera:
     """ This class is a generic camera class used for rendering. """
-    def __init__(self, near, far, fov, resolution, screen_resolution):
+    def __init__(self, fov, near, far, resolution, size):
         
-        # Display & rendering pre-calculations:
-        self.screen_resolution = screen_resolution
-        self.h_screen_center = self.screen_resolution[0] / 2
-        self.v_screen_center = self.screen_resolution[1] / 2
+        # Variables
         self.fov = fov
-        self.aspect_ratio = resolution[0] / resolution[1]
-        self.scale = 1 / (math.tan(0.5 * math.radians(self.fov)))
-        self.h_scale_const = 0.5 * (resolution[0] * self.scale / min((1, self.aspect_ratio)))
-        self.v_scale_const = 0.5 * (resolution[1] * self.scale * max((1, self.aspect_ratio)))
-        self.h_center = 0.5 * resolution[0]
-        self.v_center = 0.5 * resolution[1]
+        self.deviation = (self.fov / 360) / 4  # used checking of an object can be seen by the camera.
         self.resolution = resolution
-        self.deviation = (self.fov / 360)  # used checking of an object can be seen by the camera.
+        self.size = size
         self.near = near
         self.far = far
-        self.clip = self.genClip()
-
-        # Movement:
         self.x_rotation = 0
         self.y_rotation = 0
         self.sensitivity = 2.5 / 1000
         self.radius = 0.5
-        self.height = 0.5
+        self.height = 1
         self.gravity = Gravity()
+        self.clip = self.genClip()
+
+        # Movement:
         self.move = False
         self.move_w = False
         self.move_e = False
@@ -279,36 +307,38 @@ class Camera:
         self.move_s = False
 
         self.movespeed = 0
-        self.maxspeed = 0.05
+        self.maxspeed = 0.025
 
         # Vectors
         self.position = Vect3(0, 0, 0)
         self.rotation = Vect3(0, 0, 1)
         self.velocity = Vect3(0, -1, 0)
 
-        # Debug:
-        self.filtering_toggle = True
-
     def genClip(self):
         """ This function handles generating the points that form the clipping plane used when rendering. """
 
-        # Solve for top and left sides of the far plane:
-        horizontal_far_side_length = ((0 - self.h_center) * self.far) / self.h_scale_const
-        vertical_far_side_length = ((0 - self.v_center) * self.far) / self.v_scale_const
+        # Solve for horizontal and vertical fov in radians
+        horizontal_fov = (500 - 11.5) * 0.01745329251
+        vertical_fov = horizontal_fov * 1.77
 
-        # Solve for top and left sides of the near plane:
-        horizontal_near_side_length = ((0 - self.h_center) * self.near) / self.h_scale_const
-        vertical_near_side_length = ((0 - self.v_center) * self.near) / self.v_scale_const
+        print(self.fov)
+        print(horizontal_fov, vertical_fov)
+
+        # Solve for the top and left sides of the far plane
+        horizontal_far_side_length = self.far * (math.tan(horizontal_fov))  # solve for horizontal side length
+        vertical_far_side_length = self.far * (math.tan(vertical_fov))      # solve for vertical side length
+
+        print(horizontal_far_side_length, vertical_far_side_length)
 
         # generate points:
         c1 = Vect3(horizontal_far_side_length, vertical_far_side_length, self.far)
         c2 = Vect3(horizontal_far_side_length, -1 * vertical_far_side_length, self.far)
-        c3 = Vect3(horizontal_near_side_length, vertical_near_side_length, self.near)
-        c4 = Vect3(horizontal_near_side_length, -1 * vertical_near_side_length, self.near)
+        c3 = c1.normalize() * self.near
+        c4 = c2.normalize() * self.near
         c5 = Vect3(-1 * horizontal_far_side_length, vertical_far_side_length, self.far)
         c6 = Vect3(-1 * horizontal_far_side_length, -1 * vertical_far_side_length, self.far)
-        c7 = Vect3(-1 * horizontal_near_side_length, vertical_near_side_length, self.near)
-        c8 = Vect3(-1 * horizontal_near_side_length, -1 * vertical_near_side_length, self.near)
+        c7 = c5.normalize() * self.near
+        c8 = c6.normalize() * self.near
 
         # Generate planes from points.
         planes = (Plane(c1, c5, c7), Plane(c6, c2, c4), Plane(c6, c5, c1), Plane(c7, c4, c3), Plane(c3, c2, c1),
@@ -316,23 +346,7 @@ class Camera:
 
         return planes
 
-    def setProperties(self, near, far, fov, resolution):
-        """ This function handles changing different aspects of the camera's behavior. """
-        self.near = near
-        self.far = far
-        self.fov = fov
-        self.aspect_ratio = resolution[0] / resolution[1]
-        self.scale = 1 / (math.tan(0.5 * math.radians(self.fov)))
-        self.h_scale_const = 0.5 * (resolution[0] * self.scale / min((1, self.aspect_ratio)))
-        self.v_scale_const = 0.5 * (resolution[1] * self.scale * max((1, self.aspect_ratio)))
-        self.h_center = 0.5 * resolution[0]
-        self.v_center = 0.5 * resolution[1]
-        self.resolution = resolution
-        self.deviation = (self.fov / 360)
-
-        self.clip = self.genClip()
-
-    def update(self, colliders, frame_delta):
+    def update(self, colliders, frame_delta, center):
         """ This function handles updating the camera's position, rotation and velocity.
             The value returned by this function determines the game state."""
         # handle inputs
@@ -349,7 +363,6 @@ class Camera:
                 if event.key == ord('s'): self.move_s, self.move_n, self.move = True, False, True
             elif event.type == pygame.KEYUP:
                 # the player has stopped moving
-                if event.key == ord('t'): self.filtering_toggle = not self.filtering_toggle
                 if event.key == ord('a'): self.move_w = False
                 if event.key == ord('d'): self.move_e = False
                 if event.key == ord('w'): self.move_n = False
@@ -398,9 +411,9 @@ class Camera:
 
         # Get mouse position
         mouse_position = pygame.mouse.get_pos()
-        pygame.mouse.set_pos((self.h_screen_center, self.v_screen_center))
-        roty = (mouse_position[0] - self.h_screen_center) * self.sensitivity
-        rotx = (mouse_position[1] - self.v_screen_center) * self.sensitivity
+        pygame.mouse.set_pos([center[0], center[1]])
+        roty = (mouse_position[0] - center[0]) * self.sensitivity
+        rotx = (mouse_position[1] - center[1]) * self.sensitivity
 
         self.x_rotation += rotx * 57.2957795131
         self.y_rotation += roty * 57.2957795131
@@ -452,7 +465,7 @@ class Collider:
             face = self.mesh[i]
 
             # Generate plane for each face so speed up runtime execution:
-            a, b, c = face.a, face.b, face.c
+            a, b, c = face.a.p, face.b.p, face.c.p
             plane = Plane(a, b, c)
             self.planes += (plane,)
 
@@ -493,40 +506,30 @@ class Collider:
     def sphereCollideCheck(self, pos, vel, radius):
         """ This function handles un-intersecting a sphere collider with a mesh."""
 
-        # delta_shift   -       Vector3 that will un-intersect the player from all faces collided with
+        # delta_shift   -       Vector3 that will un-intersect the player from all of the faces collided wit
         # collisions    -       number of collisions detected. used when calculating delta shift
-        # distance      -       stores point-to-plane distance for current plane
+        # distance      -       stores point-to-plane distance.
 
-        delta_shift = Vect3(0, 0, 0)
+        delta_shift = pygame.math.Vector3(0, 0, 0)
         collisions = 0
-
         radius_squared = radius * radius
         new_pos = pos + vel
 
-        executor = concurrent.futures.ThreadPoolExecutor()
-        processes = [executor.submit(sphereCollideSegment, self.planes[i], self.points[i], new_pos, radius, radius_squared) for i in range(len(self.planes))]
-
-        for f in concurrent.futures.as_completed(processes):
-            result = f.result()
-            delta_shift += result[0]
-            collisions += result[1]
-
+        # Check for collision:
+        for i in range(len(self.points)):
+            distance = self.planes[i].pointToPlane(new_pos)
+            if radius > distance > -radius:
+                for point in self.points[i]:
+                    if ((point - new_pos) * (point - new_pos)) < radius_squared:
+                        collisions += 1
+                        if self.planes[i].n[1] > 0.6:
+                            delta_shift += pygame.math.Vector3(0, radius - distance, 0)
+                        else:
+                            delta_shift += pygame.math.Vector3(self.planes[i].n * (radius - distance))
+                        break
         if collisions != 0:
             delta_shift = delta_shift / collisions
         return delta_shift, collisions
-
-
-def sphereCollideSegment(plane, points, position, radius, radius_squared):
-    distance = plane.pointToPlane(position)
-    if radius > distance > (0 - radius):
-        for point in points:
-            if ((point - position) * (point - position)) < radius_squared:
-                if plane.n[1] > 0.6:
-                    delta_shift = pygame.math.Vector3(0, radius - distance, 0)
-                else:
-                    delta_shift = pygame.math.Vector3(plane.n * (radius - distance))
-                return delta_shift, 1
-    return Vect3(0, 0, 0), 0
 
 
 def getNormal(a, b, c):
@@ -573,17 +576,19 @@ def warn(key, exception):
         print("Index out of range! ", exception, "Is not a valid index.")
 
 
-def project(mesh, camera):
+def project(mesh, scale, h, v):
     """ This function handles perspective projection of points."""
+    projected = ()
+
     # Project vertices
     for p in mesh.vertices:
         try:
             inv_z = -1 / p.z
-            p.x = ((p.x * inv_z) * camera.h_scale_const) + camera.h_center
-            p.y = ((p.y * inv_z) * camera.v_scale_const) + camera.v_center
-            p.z = inv_z
+            projected += (Vect3(((p.x * inv_z) * scale + h), ((p.y * inv_z) * scale + v), inv_z),)
         except ZeroDivisionError:
-            pass
+            projected += (p,)
+
+    mesh.vertices = projected
 
     return mesh
 
@@ -615,6 +620,11 @@ def QuickSort(sort, index):
     return sort, left[1] + [index[current_position]] + right[1]
 
 
+def lerp_factor(a, b, c):
+    """ This function returns the amount of interpolation is required between a to b to end at c"""
+    return (c - a) / ((c - a) - (c - b))
+
+
 def interp(x1, y1, x2, y2, y):
     """ This function interpolates between two points at a given y."""
     try:
@@ -624,24 +634,35 @@ def interp(x1, y1, x2, y2, y):
         return x1
 
 
-def display_text(windowSurface, line, text, font, fg, linetype):
-    """ This function writes text on the screen """
-    # Variables:
-    # windowSurface      -     Surface the text is drawn on
-    # line               -     Currently broken,
+def clipPolygonPlane(a, b, c, plane):
+    """ This function handles clipping a polygon against a single plane. """
+    a_distance, b_distance, c_distance = plane.pointToPlane(a.p), plane.pointToPlane(b.p), plane.pointToPlane(c.p)
+    a_inside, b_inside, c_inside = a_distance > 0.001, b_distance > 0.001, c_distance > 0.001,
+    inside = int(a_inside) + int(b_inside) + int(c_inside)
 
-    # set up the text
-    text = font.render(text, False, fg)
-    textRect = text.get_rect()
+    if inside == 0:
+        return None, None, 0
 
-    textRect.top = windowSurface.get_rect().top + (font.get_height() * line)
-    if linetype == 'l':
-        textRect.left = windowSurface.get_rect().left
-    elif linetype == 'r':
-        textRect.right = windowSurface.get_rect().right
-    elif linetype == 'c':
-        textRect.centerx = windowSurface.get_rect().centerx
+    elif inside == 1:
+        if a_inside:
+            b, c = plane.vertexPlaneIntersect(a, b), plane.vertexPlaneIntersect(a, c)
+        elif b_inside:
+            a, c = plane.vertexPlaneIntersect(b, a), plane.vertexPlaneIntersect(b, c)
+        elif c_inside:
+            b, a = plane.vertexPlaneIntersect(c, b), plane.vertexPlaneIntersect(c, a)
+        return (a, b, c), None, 1
 
-    # draw the text's background rectangle onto the surface
-    windowSurface.blit(text, textRect)
+    elif inside == 2:
+        if not a_inside:  # A is off-screen
+            ab, ac = plane.vertexPlaneIntersect(a, b), plane.vertexPlaneIntersect(a, c)
+            return (b, ab, ac), (c, b, ac), 2
 
+        elif not b_inside:  # B is off-screen
+            bc, ba = plane.vertexPlaneIntersect(b, c), plane.vertexPlaneIntersect(b, a)
+            return (a, ba, bc), (a, c, bc), 2
+
+        elif not c_inside:  # C is off-screen
+            cb, ca = plane.vertexPlaneIntersect(c, b), plane.vertexPlaneIntersect(c, a)
+            return (b, cb, ca), (b, a, ca), 2
+
+    return None, None, 3
