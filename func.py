@@ -273,10 +273,13 @@ class Camera:
         self.height = 0.5
         self.gravity = Gravity()
         self.move = False
-        self.move_w = False
-        self.move_e = False
         self.move_n = False
+        self.move_e = False
         self.move_s = False
+        self.move_w = False
+
+        self.move_py = False
+        self.move_ny = False
 
         self.movespeed = 0
         self.maxspeed = 0.05
@@ -288,6 +291,7 @@ class Camera:
 
         # Debug:
         self.filtering_toggle = True
+        self.noclip = False
 
     def genClip(self):
         """ This function handles generating the points that form the clipping plane used when rendering. """
@@ -341,15 +345,22 @@ class Camera:
                 return False
             elif event.type == pygame.KEYDOWN:
                 # update the direction of the player
-                if event.key == pygame.K_ESCAPE: return False
-                if event.key == pygame.K_SPACE: self.gravity.set_jumping()
+                if event.key == pygame.K_ESCAPE:
+                    return False
+                if event.key == pygame.K_SPACE:
+                    self.move_py, self.move_ny, self.move = True, False, True
+                    self.gravity.set_jumping()
+                if event.key == pygame.K_LSHIFT: self.move_ny, self.move_py, self.move = True, False, True
                 if event.key == ord('a'): self.move_w, self.move_e, self.move = True, False, True
                 if event.key == ord('d'): self.move_e, self.move_w, self.move = True, False, True
                 if event.key == ord('w'): self.move_n, self.move_s, self.move = True, False, True
                 if event.key == ord('s'): self.move_s, self.move_n, self.move = True, False, True
             elif event.type == pygame.KEYUP:
                 # the player has stopped moving
+                if event.key == pygame.K_SPACE: self.move_py = False
+                if event.key == pygame.K_LSHIFT: self.move_ny = False
                 if event.key == ord('t'): self.filtering_toggle = not self.filtering_toggle
+                if event.key == ord('f'): self.noclip = not self.noclip
                 if event.key == ord('a'): self.move_w = False
                 if event.key == ord('d'): self.move_e = False
                 if event.key == ord('w'): self.move_n = False
@@ -374,20 +385,25 @@ class Camera:
         if self.move_w: new_vector += self.velocity.rotate_y(90)
         if self.move_e: new_vector += self.velocity.rotate_y(270)
 
-        # Calculate Gravity:
-        self.gravity.update(frame_delta)
-        gravity = Vect3(0, 0.05 * self.gravity.current_value, 0) * frame_delta
-        new_vector += gravity
+        if self.noclip:  # No clip movement:
+            if self.move_py: new_vector.y += self.movespeed
+            if self.move_ny: new_vector.y -= self.movespeed
 
-        # Check for collisions
-        collisions = 0
-        for collider in colliders:
-            if collider.enabled:
-                collision = collider.sphereCollideCheck(self.position, new_vector, self.radius)
-                new_vector += collision[0]
-                collisions += collision[1]
-        if collisions > 0:
-            self.gravity.set_falling()
+        else:  # Normal movement:
+            # Calculate Gravity:
+            self.gravity.update(frame_delta)
+            gravity = Vect3(0, 0.05 * self.gravity.current_value, 0) * frame_delta
+            new_vector += gravity
+
+            # Check for collisions
+            collisions = 0
+            for collider in colliders:
+                if collider.enabled:
+                    collision = collider.sphereCollideCheck(self.position, new_vector, self.radius)
+                    new_vector += collision[0]
+                    collisions += collision[1]
+            if collisions > 0:
+                self.gravity.set_falling()
 
         # I should add a ray cast from previous position to new position and check for missed collisions.
         # If the player had a new position, "n", but the ray from the previous position to "n" intersects a wall "i",
@@ -458,36 +474,20 @@ class Collider:
 
             # Generate list of points that form the face:
             new_points = (a, b, c,)
-            y_step = int(a.distance_to(c) / gap)
-
-            for y in range(y_step):
-                y_interp = (y / y_step)
-
-                cA = a.lerp(c, y_interp)
-                cB = b.lerp(c, y_interp)
-
-                # Get the distance between the newly generated points from previous lerp operation:
-                x_step = int(cA.distance_to(cB) / gap)
-
-                for x in range(x_step):
-                    x_interp = (x / x_step)
-                    new_point = cA.lerp(cB, x_interp)
-                    new_points += (new_point,)
 
             # add new points to temporary container.
             self.points += (new_points,)
 
-    def sphereIntersect(self, pos, rad):
+    def sphereIntersect(self, pos, radius):
         """ This function handles checking for intersections with a sphere collider."""
         # this method is functionally the same as the other method that unintersects the sphere.
         # this one is more efficient for triggers / non-colliding colliders.
-        radSqr = rad * rad
-        for i in range(len(self.points)):
+        radSqr = radius * radius
+        for i in range(len(self.planes)):
             distance = self.planes[i].pointToPlane(pos)
-            if rad > distance > -rad:
-                for point in self.points[i]:
-                    if ((point - pos) * (point - pos)) < radSqr:
-                        return True
+            if radius > distance > -radius:
+                if pointOnTrigon(radSqr, pos, self.points[i][0], self.points[i][1], self.points[i][2]):
+                    return True
         return False
 
     def sphereCollideCheck(self, pos, vel, radius):
@@ -503,17 +503,33 @@ class Collider:
         radius_squared = radius * radius
         new_pos = pos + vel
 
-        executor = concurrent.futures.ThreadPoolExecutor()
-        processes = [executor.submit(sphereCollideSegment, self.planes[i], self.points[i], new_pos, radius, radius_squared) for i in range(len(self.planes))]
-
-        for f in concurrent.futures.as_completed(processes):
-            result = f.result()
-            delta_shift += result[0]
-            collisions += result[1]
+        for i in range(len(self.planes)):
+            distance = self.planes[i].pointToPlane(new_pos)
+            if radius > distance > 0 - radius:
+                if pointOnTrigon(radius_squared, new_pos, self.points[i][0], self.points[i][1], self.points[i][2]):
+                    if self.planes[i].n[1] > 0.6:
+                        shift = Vect3(0, 1, 0) * (self.planes[i].n * (radius - distance)).length()
+                    else:
+                        shift = Vect3(self.planes[i].n * (radius - distance))
+                    delta_shift += shift
+                    collisions += 1
 
         if collisions != 0:
             delta_shift = delta_shift / collisions
         return delta_shift, collisions
+
+
+def pointOnTrigon(radsqr, p, v1, v2, v3):
+    """ This function returns if a given point is on trigon(a, b, c). """
+
+    a, b, c = v1 - p, v2 - p, v3 - p
+    u, v, w = b.cross(c), c.cross(a), a.cross(b)
+    if u.dot(v) > 0.01 and u.dot(w) > 0.01:
+        return True
+
+    if p.distance_squared_to(v1) <= radsqr or p.distance_squared_to(v3) <= radsqr or p.distance_squared_to(v2) <= radsqr:
+        return True
+    return False
 
 
 def sphereCollideSegment(plane, points, position, radius, radius_squared):

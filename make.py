@@ -1,4 +1,4 @@
-# This program handles asset creation / reassignment for version 2.7 of ΔRender
+# This program handles asset creation / reassignment for version 2.8 of ΔRender
 # This program was writen by Ethan Parker
 
 import func
@@ -126,6 +126,6 @@ def copy_Mesh(mesh):
     new_mesh.vertices = mesh.vertices
     new_mesh.uv_vertices = mesh.uv_vertices
     new_mesh.polygons = mesh.polygons
-    new_mesh.uv_polygons =mesh.uv_polygons
+    new_mesh.uv_polygons = mesh.uv_polygons
     return new_mesh
 

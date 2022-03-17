@@ -1,4 +1,4 @@
-# This program handles rasterization and drawing of polygons for version 2.7 of ΔRender
+# This program handles rasterization and drawing of polygons for version 2.8 of ΔRender
 # This program was writen by Ethan Parker on 03/08/22
 import concurrent.futures
 from ast import Index
@@ -11,10 +11,10 @@ from pygame.math import Vector2 as Vect2
 
 TRANSPARENCY = pygame.Color(255, 0, 255)
 
-DITHER = ((0 / 16, 8 / 16, 2 / 16, 10 / 16),
-		  (12 / 16, 4 / 16, 14 / 16, 6 / 16),
-		  (3 / 16, 11 / 16, 1 / 16, 9 / 16),
-		  (15 / 16, 7 / 16, 13 / 16, 5 / 16),)
+DITHER = (((0 / 16) - 0.5,(8 / 16) - 0.5,(2 / 16) - 0.5,(10 / 16) - 0.5),
+		((12 / 16) - 0.5,(4 / 16) - 0.5,(14 / 16) - 0.5,(6 / 16) - 0.5),
+		((3 / 16) - 0.5,(11 / 16) - 0.5,(1 / 16) - 0.5,(9 / 16) - 0.5),
+		((15 / 16) - 0.5,(7 / 16) - 0.5,(13 / 16) - 0.5,(5 / 16) - 0.5))
 
 
 def quickInterp(x1, y1, x2, inv_dist, y):
@@ -39,7 +39,7 @@ def interp_line(a, b):
 	inv_dist = 1 / (b.y - a.y)
 
 	# Multiply texture coordinate by inverted Z.
-	# This is done so that correct interpolation can be done in screen-space.
+	# This is done so that when we interpolate between z values, they'll be in screen-space (1 / z).
 	ui, vi = u * a.z, v * b.z
 	line = ((a, ui),)
 
@@ -52,15 +52,28 @@ def interp_line(a, b):
 	return line
 
 
-def render(mesh, screen, depth, textures, textures_index, filtering):
+def render(mesh, screen, depth, textures, ti, filtering):
 	""" This function handles rendering a mesh to the screen. """
+	if len(mesh) == 0: return
 
 	indices = list(range(len(mesh)))
 	indices = func.QuickSort(mesh.depth, indices)[1]
 
+	if filtering: dither = DITHER
+	else: dither = ((0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0),)
+
+	current_ti = ti[0]
+	texture = textures[current_ti]
+	txH, txW = texture.get_height() - 1, texture.get_width() - 1
+
 	for index in indices:
-		face, texture = mesh[index], textures[textures_index[index]]
-		txH, txW = texture.get_height() - 1, texture.get_width() - 1
+
+		if current_ti != ti[index]:
+			current_ti = ti[index]
+			texture = textures[current_ti]
+			txH, txW = texture.get_height() - 1, texture.get_width() - 1
+
+		face = mesh[index]
 		a, b, c = (face.a, face.u), (face.b, face.v), (face.c, face.w)
 
 		# Sort by top to bottom:
@@ -85,7 +98,7 @@ def render(mesh, screen, depth, textures, textures_index, filtering):
 		# Rasterize Polygon
 		for y in range(height):
 			# Render with dithering & depth buffer
-			ls, rs, tls, trs = left[y][0], right[y][0], left[y][1], right[y][1]
+			ls, rs= left[y][0], right[y][0]
 			offset = round(rs.x)
 			dist = (rs.x - ls.x)
 
@@ -97,38 +110,42 @@ def render(mesh, screen, depth, textures, textures_index, filtering):
 					inv_z = quickInterp(ls.z, ls.x, rs.z, inv_dist, step)
 					try:
 						if depth[point[1]][point[0]] > inv_z:
+							z = 1 / inv_z  # Convert z back to world space, solving for the z at this pixel. ( 1 / (1 / z) = z)
 							# Get current texture coordinate:
-							z = 1 / inv_z
-							if filtering: dither = DITHER[point[1] % 4][point[0] % 4]
-							else: dither = 0
-							u = (func.interp(tls.x, ls.x, trs.x, rs.x, step) * z) % 1
-							v = (func.interp(tls.y, ls.x, trs.y, rs.x, step) * z) % 1
-							uv = (int(u * txW + dither), int(v * txH + dither))
+							d = dither[point[0] % 4][point[1] % 4]
+							u = (func.interp(left[y][1].x, ls.x, right[y][1].x, rs.x, step) * z) % 1
+							v = (func.interp(left[y][1].y, ls.x, right[y][1].y, rs.x, step) * z) % 1
+							uv = (int(u * txW + d), int(v * txH + d))
 							colour = texture.get_at(uv)
-							# Write to screen:
+
 							if colour != TRANSPARENCY:
 								screen[point[0]][point[1]] = colour
 								depth[point[1]][point[0]] = inv_z
-					except:
+					except IndexError:
 						pass
 
 
 def renderSkybox(mesh, screen, pixel_array, texture):
 	""" This function handles rendering a mesh to the screen. """
+
+	maped = screen.map_rgb(TRANSPARENCY)
 	txH, txW = texture.get_height() - 1, texture.get_width() - 1
-	for i in range(len(mesh)):
-		face = mesh[i]
-		a, b, c, u, v, w = face.a.p, face.b.p, face.c.p, face.a.t, face.b.t, face.c.t
+
+	for index in range(len(mesh)):
+		face = mesh[index]
+		a, b, c = (face.a, face.u), (face.b, face.v), (face.c, face.w)
 
 		# Sort by top to bottom:
-		if a.y > b.y: a, b, u, v, = b, a, v, u
-		if b.y > c.y: b, c, v, w, = c, b, w, v
-		if a.y > b.y: a, b, u, v, = b, a, v, u
+		if a[0].y > b[0].y: a, b = b, a
+		if b[0].y > c[0].y: b, c = c, b
+		if a[0].y > b[0].y: a, b = b, a
 
-		left = interp_line(a, b, u, v) + interp_line(b, c, v, w)
-		right = interp_line(a, c, u, w)
+		# Generate left and right sides of the polygon:
+		left = interp_line(a, b) + interp_line(b, c)
+		right = interp_line(a, c)
+
 		height = len(right)
-		top = round(a.y)
+		top = round(a[0].y)
 
 		# Check for zero area:
 		if height == 0:
@@ -140,23 +157,19 @@ def renderSkybox(mesh, screen, pixel_array, texture):
 		# Rasterize Polygon
 		for local_y in range(height):
 			# Render with dithering & depth buffer
-			ls, rs, tls, trs = left[local_y][0], right[local_y][0], left[local_y][1], right[local_y][1]
-			rs_offset = round(rs.x)
-			ls_offset = round(ls.x)
+			ls, rs = left[local_y][0], right[local_y][0]
+			offset = round(rs.x)
 			dist = (rs.x - ls.x)
-
 			if dist != 0:
 				inv_dist = 1 / dist
-
-				for local_x in range(ls_offset - rs_offset):
-					x = local_x + rs_offset
-					y = local_y + top
+				for local_x in range(round(ls.x) - offset):
+					x, y = local_x + offset, local_y + top
 					try:
-						if pixel_array[x][y] == screen.map_rgb(TRANSPARENCY):
-							z = 1 / quickInterp(ls.z, ls.x, rs.z, inv_dist, x)
+						if pixel_array[x][y] == maped:
 							dither = DITHER[y % 4][x % 4]
-							u = (func.interp(tls.x, ls.x, trs.x, rs.x, x) * z) % 1
-							v = (func.interp(tls.y, ls.x, trs.y, rs.x, x) * z) % 1
+							z = 1 / quickInterp(ls.z, ls.x, rs.z, inv_dist, x)
+							u = (func.interp(left[local_y][1].x, ls.x, right[local_y][1].x, rs.x, x) * z) % 1
+							v = (func.interp(left[local_y][1].y, ls.x, right[local_y][1].y, rs.x, x) * z) % 1
 							uv = (int(u * txW + dither), int(v * txH + dither))
 							colour = texture.get_at(uv)
 							pixel_array[x][y] = colour

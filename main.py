@@ -1,4 +1,4 @@
-# This program is the mainline for version 2.7 of ΔRender
+# This program is the mainline for version 2.8 of ΔRender
 # this program was writen by Ethan Parker
 
 
@@ -12,9 +12,9 @@ from pygame import PixelArray as PxArry
 from pygame.math import Vector3 as Vect3
 from pygame.math import Vector2 as Vect2
 
-SCALE = 4
+SCALE = 6
 FOV = 90
-SCREENSIZE = (640, 480)
+SCREENSIZE = (1024, 576)
 
 
 class Game:
@@ -36,7 +36,7 @@ class Game:
         self.scale = res
 
         # Display Settings:
-        self.font = pygame.font.SysFont("courier new", 24)
+        self.font = pygame.font.SysFont("courier new", 12)
         self.screen = pygame.Surface(self.render_resolution).convert()
         self.screen.set_colorkey(render.TRANSPARENCY)
         self.screen.lock()
@@ -59,9 +59,9 @@ class Game:
         # Debug:
         self.onscreen = 0
 
-    def clipMesh(self, mesh, textures_index):
+    def clipMesh(self, original_mesh, textures_index):
         """ This function handles clipping the scene. """
-
+        mesh = make.copy_Mesh(original_mesh)
         # preliminary pass to get rid of back facing polygons:
         index = 0
         while index < len(mesh):
@@ -152,7 +152,7 @@ class Game:
         self.world, self.textures_index = clipped[0], clipped[1]
 
         # Clear buffers from last frame:
-        self.pixel_array[:] = self.sky_colour
+        self.pixel_array[:] = render.TRANSPARENCY  # self.sky_colour
         self.clear_depth()
         self.world.update()
         self.onscreen = len(self.world)
@@ -168,11 +168,12 @@ class Game:
 
     def draw_screen(self, window):
         self.render()
-        # self.draw_skybox()
+        self.draw_skybox()
         # Update Display:
         screen_scale = pygame.transform.scale(self.screen, window.get_size())
         window.blit(screen_scale, (0, 0))
-        func.display_text(window, 0, "|| Onscreen " + str(self.onscreen) + " | FPS | " + str(round(60 / self.frame_delta)) + " ||", self.font, (0, 0, 0), 'c')
+        # func.display_text(window, 0, "O_S|" + str(self.onscreen), self.font, (0, 0, 0), 'c')
+        func.display_text(window, 0, "FPS|" + str(round(60 / self.frame_delta)), self.font, (0, 0, 0), 'c')
         pygame.display.flip()
 
 
@@ -187,7 +188,7 @@ def main():
     pygame.display.set_caption("Software Render")
 
     meshes = (make.Mesh("assets/meshes/ship.obj", "assets/textures/ship.png"),
-              make.Mesh("assets/meshes/water.obj", "assets/textures/water.png"),
+              # make.Mesh("assets/meshes/water.obj", "assets/textures/water.png"),
               )
 
     colliders = (make.Collider("assets/colliders/ship.obj", 0.25, True),
@@ -196,10 +197,10 @@ def main():
     game = Game(meshes, colliders, SCREENSIZE, SCALE, FOV)
     pygame.mouse.set_visible(False)
 
-    i = 0
+    # i = 0
     while True:
-        i += 0.01 * game.frame_delta
-        game.meshes[1].move_to(Vect3(0, -3, i % 32))
+        # i += 0.01 * game.frame_delta
+        # game.meshes[1].move_to(Vect3(0, -3, i % 32))
         game.run_logic(clock, fps)
         game.draw_screen(window)
         if not game.is_active:
