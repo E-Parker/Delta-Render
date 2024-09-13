@@ -448,24 +448,28 @@ def main():
     #NOTE:
     # the forward axis is -x
 
-    textures = (
-        'ship.png',
-        #'Axis.png',
-    )
+    textures = ('high.png','chart.png')
     
-    props = (
-        ('ship.obj',    0,  Vect3(0,0,0), (0,0,0), 'dynamic'), 
-        #('Axis.obj',    1,  Vect3(0,0,0), (0,0,0), 'dynamic'),
-    )
- 
-    colliders = (
-        ('ship.obj',    Vect3(0,0,0),(0,0,0),'static'),
-    )
-                 
+    props = (('plane.obj',      1,  Vect3(0,2,0),           (0,0,0),        'dynamic'),
+             ('spyroHub.obj',   0,  Vect3(0,0,0),           (0,0,0),        'static'),)
+    
+    colliders = (('plane.obj',       Vect3(0,2,0),    (0,0,0),      'dynamic'),
+                 ('spyroHub.obj',    Vect3(0,0,0),    (0,0,0),      'static'),)
+      
     instance.loadFiles(props, colliders, textures, Display)
     i = 0
 
     while 1:
+        i += 0.01 * instance.frameDelta
+
+        x = (sin(i * 3.5) * 1.3) * 3
+        y = (sin(i * 2.5) * 0.2) * 3
+        z = (sin(i * 1.5) * 2.5) * 3
+
+        instance.meshes[0].position = Vect3(0,sin(i) * 0.5,0)
+        instance.meshes[0].rotation = [x, y, z]
+        instance.colliders[0].position = Vect3(0,sin(i) * 0.5,0)
+        instance.colliders[0].rotation = [x, y, z]
         
         instance.run_logic(clock)
         instance.render(Display)
